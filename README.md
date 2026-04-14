@@ -204,8 +204,10 @@ text:
 ### Cập nhật
 - **KEYBOARD** Hiện tại bàn phím trên màn hình đã được hỗ trợ (Cần cài đặt lại addon ở phía server)
 - **frame_update** Hỗ trợ cảm biến theo dõi khung hình có đang liên tục cập nhật hay không. Nếu liên tục cập nhật có nghĩa là màn hình đang hiển thị video(hoặc ảnh động). Hữu ích cho việc cấu hình không tắt đèn nền khi màn hình đang phát stream camera. Có thể sử dụng lambda để lấy trạng thái: Ví dụ:
-- lambda: |-
-    return id(rwv).is_receiving_frames(3000);
+```yaml
+    lambda: |-
+      return id(rwv).is_receiving_frames(3000);
+```
 
-- **Rotation** Hiện đã chạy theo realtime. Có thể thay đổi góc xoay màn hình trực tiếp khi thiết bị đang chạy mà không cần khởi động lại
+- **Rotation** Hiện đã xoay màn hình theo realtime. Có thể thay đổi góc xoay màn hình trực tiếp khi thiết bị đang chạy mà không cần khởi động lại
 

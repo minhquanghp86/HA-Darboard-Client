@@ -1,53 +1,60 @@
 import re
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components import display, touchscreen
+from esphome import automation
+from esphome.components import display, touchscreen, binary_sensor
 from esphome.components.display import validate_rotation
 from esphome.const import CONF_ID, CONF_DISPLAY_ID, CONF_URL, CONF_ROTATION
 
-
-CONF_DEVICE_ID = "device_id"
-CONF_TOUCHSCREEN_ID = "touchscreen_id"
-CONF_SERVER = "server"
-CONF_TILE_SIZE = "tile_size"
-CONF_FULL_FRAME_TILE_COUNT = "full_frame_tile_count"
+CONF_DEVICE_ID               = "device_id"
+CONF_TOUCHSCREEN_ID          = "touchscreen_id"
+CONF_SERVER                  = "server"
+CONF_TILE_SIZE               = "tile_size"
+CONF_FULL_FRAME_TILE_COUNT   = "full_frame_tile_count"
 CONF_FULL_FRAME_AREA_THRESHOLD = "full_frame_area_threshold"
-CONF_FULL_FRAME_EVERY = "full_frame_every"
-CONF_EVERY_NTH_FRAME = "every_nth_frame"
-CONF_MIN_FRAME_INTERVAL = "min_frame_interval"
-CONF_JPEG_QUALITY = "jpeg_quality"
-CONF_MAX_BYTES_PER_MSG = "max_bytes_per_msg"
-CONF_BIG_ENDIAN = "big_endian"
+CONF_FULL_FRAME_EVERY        = "full_frame_every"
+CONF_EVERY_NTH_FRAME         = "every_nth_frame"
+CONF_MIN_FRAME_INTERVAL      = "min_frame_interval"
+CONF_JPEG_QUALITY            = "jpeg_quality"
+CONF_MAX_BYTES_PER_MSG       = "max_bytes_per_msg"
+CONF_BIG_ENDIAN              = "big_endian"
+CONF_FRAME_RECEIVING_SENSOR  = "frame_receiving_sensor"
+CONF_DISABLE                 = "disable"
 
 _SERVER_RE = re.compile(
     r"^(?P<host>[A-Za-z0-9](?:[A-Za-z0-9\-\.]*[A-Za-z0-9])?)\:(?P<port>\d{1,5})$"
 )
 
-AUTO_LOAD = []
+AUTO_LOAD  = ["binary_sensor"]
 DEPENDENCIES = ["display"]
+
 
 def validate_host_port(value):
     s = cv.string_strict(value).strip()
     m = _SERVER_RE.match(s)
     if not m:
         raise cv.Invalid("server must be in 'host:port' format (no IPv6, no trailing colon)")
-
-    host = m.group("host")
     port = int(m.group("port"), 10)
-
     if not (1 <= port <= 65535):
         raise cv.Invalid("port must be between 1 and 65535")
+    return f"{m.group('host')}:{port}"
 
-    return f"{host}:{port}"
 
 ns = cg.esphome_ns.namespace("remote_webview")
+
 RemoteWebView = ns.class_("RemoteWebView", cg.Component)
 
+# ── Action classes (phải khớp tên class trong .h) ──────────────────────────────
+RemoteWebViewReconnectAction    = ns.class_("RemoteWebViewReconnectAction",    automation.Action)
+RemoteWebViewDisableTouchAction = ns.class_("RemoteWebViewDisableTouchAction", automation.Action)
+
+
+# ── Component schema ───────────────────────────────────────────────────────────
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(RemoteWebView),
         cv.GenerateID(CONF_DISPLAY_ID): cv.use_id(display.Display),
-        cv.GenerateID(CONF_TOUCHSCREEN_ID): cv.use_id(touchscreen.Touchscreen),
+        cv.Optional(CONF_TOUCHSCREEN_ID): cv.use_id(touchscreen.Touchscreen),
         cv.Required(CONF_SERVER): validate_host_port,
         cv.Required(CONF_URL): cv.string,
 
@@ -62,9 +69,14 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_MAX_BYTES_PER_MSG): cv.int_,
         cv.Optional(CONF_BIG_ENDIAN): cv.boolean,
         cv.Optional(CONF_ROTATION): validate_rotation,
+
+        # Binary sensor: true khi đang nhận frame, false khi mất kết nối / không có frame
+        cv.Optional(CONF_FRAME_RECEIVING_SENSOR): binary_sensor.binary_sensor_schema(),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
+
+# ── to_code ────────────────────────────────────────────────────────────────────
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
 
@@ -100,5 +112,44 @@ async def to_code(config):
     if CONF_ROTATION in config:
         cg.add(var.set_rotation(config[CONF_ROTATION]))
 
+    if CONF_FRAME_RECEIVING_SENSOR in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_FRAME_RECEIVING_SENSOR])
+        cg.add(var.set_frame_receiving_sensor(sens))
 
     await cg.register_component(var, config)
+
+
+# ── Actions ────────────────────────────────────────────────────────────────────
+
+# Dùng trong YAML:
+#   - remote_webview.reconnect_ws:
+#       id: my_rwv
+@automation.register_action(
+    "remote_webview.reconnect_ws",
+    RemoteWebViewReconnectAction,
+    cv.Schema({cv.GenerateID(): cv.use_id(RemoteWebView)}),
+)
+async def reconnect_ws_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    return var
+
+
+# Dùng trong YAML:
+#   - remote_webview.disable_touch:
+#       id: my_rwv
+#       disable: true      # hoặc false để bật lại
+@automation.register_action(
+    "remote_webview.disable_touch",
+    RemoteWebViewDisableTouchAction,
+    cv.Schema({
+        cv.GenerateID(): cv.use_id(RemoteWebView),
+        cv.Required(CONF_DISABLE): cv.templatable(cv.boolean),
+    }),
+)
+async def disable_touch_action_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    tmpl = await cg.templatable(config[CONF_DISABLE], args, bool)
+    cg.add(var.set_disable(tmpl))
+    return var

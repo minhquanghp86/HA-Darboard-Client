@@ -6,7 +6,7 @@
 
 [Demo video](https://youtu.be/rD2aYUUrv5o)
 
-Đây là một máy khách kết nối tới [Remote WebView Server](https://github.com/minhquanghp86/RemoteWebViewServer) — trình duyệt không có giao diện hiển thị các trang web mục tiêu (ví dụ: bảng điều khiển Home Assistant) và truyền phát chúng dưới dạng các ô hình ảnh qua WebSocket đến các máy khách nhẹ (màn hình ESP32).
+Đây là một máy khách kết nối tới [Remote WebView Server](https://github.com/minhquanghp86/HA-Darboard-Server) — trình duyệt không có giao diện hiển thị các trang web mục tiêu (ví dụ: bảng điều khiển Home Assistant) và truyền phát chúng dưới dạng các ô hình ảnh qua WebSocket đến các máy khách nhẹ (màn hình ESP32).
 
 ## ESPHome component
 

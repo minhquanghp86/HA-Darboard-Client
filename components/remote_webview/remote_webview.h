@@ -2,9 +2,12 @@
 #include "esphome/core/component.h"
 #include "esphome/components/display/display.h"
 #include "esphome/components/touchscreen/touchscreen.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/core/automation.h"
 #include "JPEGDEC.h"
 #include "protocol.h"
 #include "remote_webview_config.h"
+#include <atomic>
 
 #include "esp_event.h"
 #include "esp_websocket_client.h"
@@ -30,33 +33,45 @@ namespace remote_webview {
 
 class RemoteWebView : public Component {
  public:
-  void set_display(display::Display *d) { display_ = d; }
-  void set_touchscreen(touchscreen::Touchscreen *t) { touch_ = t; }
-  void set_device_id(const std::string &s) { device_id_ = s; }
-  void set_url(const std::string &s) { url_ = s; }
+  // ── Setters (từ __init__.py) ──────────────────────────────────────────────
+  void set_display(display::Display *d)                       { display_ = d; }
+  void set_touchscreen(touchscreen::Touchscreen *t)           { touch_ = t; }
+  void set_device_id(const std::string &s)                    { device_id_ = s; }
+  void set_url(const std::string &s)                          { url_ = s; }
   void set_server(const std::string &s);
-  void set_tile_size(int v) { tile_size_ = v; }
-  void set_full_frame_tile_count(int v) { full_frame_tile_count_ = v; }
-  void set_full_frame_area_threshold(float v) { full_frame_area_threshold_ = v; }
-  void set_full_frame_every(int v) { full_frame_every_ = v; }
-  void set_every_nth_frame(int v) { every_nth_frame_ = v; }
-  void set_min_frame_interval(int v) { min_frame_interval_ = v; }
-  void set_jpeg_quality(int v) { jpeg_quality_ = v; }
-  void set_max_bytes_per_msg(int v) { max_bytes_per_msg_ = v; }
-  void set_big_endian(bool v) { rgb565_big_endian_ = v; }
-  void set_rotation(int v) { rotation_ = v; }
-  bool open_url(const std::string &s);
+  void set_tile_size(int v)                                   { tile_size_ = v; }
+  void set_full_frame_tile_count(int v)                       { full_frame_tile_count_ = v; }
+  void set_full_frame_area_threshold(float v)                 { full_frame_area_threshold_ = v; }
+  void set_full_frame_every(int v)                            { full_frame_every_ = v; }
+  void set_every_nth_frame(int v)                             { every_nth_frame_ = v; }
+  void set_min_frame_interval(int v)                          { min_frame_interval_ = v; }
+  void set_jpeg_quality(int v)                                { jpeg_quality_ = v; }
+  void set_max_bytes_per_msg(int v)                           { max_bytes_per_msg_ = v; }
+  void set_big_endian(bool v)                                 { rgb565_big_endian_ = v; }
+  void set_rotation(int v)                                    { rotation_ = v; }
 
-  void setup() override;
-  void loop() override {}
-  void dump_config() override;
+  // Gắn binary sensor "đang nhận frame"
+  void set_frame_receiving_sensor(binary_sensor::BinarySensor *s) { frame_receiving_sensor_ = s; }
+
+  // ── Public API ────────────────────────────────────────────────────────────
+  bool     open_url(const std::string &s);
+  void     disable_touch(bool disable);
+  void     reconnect_ws();
+
+  bool     is_receiving_frames(uint32_t timeout_ms = 3000) const;
+  uint64_t get_last_frame_age_ms() const;
+
+  // ── ESPHome Component API ─────────────────────────────────────────────────
+  void  setup() override;
+  void  loop() override;   // cập nhật frame_receiving_sensor_
+  void  dump_config() override;
   float get_setup_priority() const override { return setup_priority::LATE; }
 
  private:
   struct WsMsg {
     uint8_t *buf{nullptr};
     size_t   len{0};
-    void    *client{nullptr}; // opaque esp_websocket_client_handle_t
+    void    *client{nullptr};
   };
   struct WsReasm {
     uint8_t *buf{nullptr};
@@ -68,36 +83,47 @@ class RemoteWebView : public Component {
   static constexpr uint32_t kMoveIntervalUs = (kMoveRateHz ? (1000000u / kMoveRateHz) : 0);
 
   static RemoteWebView *self_;
-  display::Display *display_{nullptr};
-  touchscreen::Touchscreen *touch_ = nullptr;
-  class RemoteWebViewTouchListener *touch_listener_ = nullptr;
+
+  display::Display          *display_{nullptr};
+  touchscreen::Touchscreen  *touch_{nullptr};
+  class RemoteWebViewTouchListener *touch_listener_{nullptr};
+  binary_sensor::BinarySensor *frame_receiving_sensor_{nullptr};
+
   std::string url_;
   std::string server_host_;
   std::string device_id_;
-  int server_port_{0};
-  int tile_size_{-1};
-  int full_frame_tile_count_{-1};
+  int         server_port_{0};
+
+  // Tham số cấu hình (−1 = chưa set → server dùng default)
+  int   tile_size_{-1};
+  int   full_frame_tile_count_{-1};
   float full_frame_area_threshold_{-1.0f};
-  int full_frame_every_{-1};
-  int every_nth_frame_{-1};
-  int min_frame_interval_{-1};
-  int jpeg_quality_{-1};
-  int max_bytes_per_msg_{-1};
-  bool rgb565_big_endian_{true};
-  int rotation_{0};
+  int   full_frame_every_{-1};
+  int   every_nth_frame_{-1};
+  int   min_frame_interval_{-1};
+  int   jpeg_quality_{-1};
+  int   max_bytes_per_msg_{-1};
+  bool  rgb565_big_endian_{true};
+  int   rotation_{0};
+
+  // Trạng thái — dùng atomic để an toàn cross-task
+  std::atomic<bool>     touch_disabled_{false};
+  std::atomic<uint64_t> last_frame_us_{0};
 
 #if REMOTE_WEBVIEW_HW_JPEG
   jpeg_decoder_handle_t hw_dec_{nullptr};
   uint8_t *hw_decode_input_buf_{nullptr};
   uint8_t *hw_decode_output_buf_{nullptr};
-  size_t hw_decode_input_size_{0};
-  size_t hw_decode_output_size_{0};
+  size_t   hw_decode_input_size_{0};
+  size_t   hw_decode_output_size_{0};
 #endif
 
+  // Timing
   uint64_t last_move_us_{0};
   uint64_t last_keepalive_us_{0};
-  
-  uint64_t frame_start_us_ = 0;
+
+  // Frame state (chỉ truy cập từ decode task)
+  uint64_t frame_start_us_{0};
   uint32_t frame_id_{0xffffffffu};
   uint16_t frame_tiles_{0};
   size_t   frame_bytes_{0};
@@ -105,6 +131,7 @@ class RemoteWebView : public Component {
   uint32_t frame_stats_count_{0};
   size_t   frame_stats_bytes_{0};
 
+  // FreeRTOS handles
   QueueHandle_t     q_decode_{nullptr};
   SemaphoreHandle_t ws_send_mtx_{nullptr};
   TaskHandle_t      t_ws_{nullptr};
@@ -112,28 +139,32 @@ class RemoteWebView : public Component {
 
   esp_websocket_client_handle_t ws_client_{nullptr};
 
+  // Task / event handler
   void start_ws_task_();
   void start_decode_task_();
   static void ws_task_tramp_(void *arg);
   static void decode_task_tramp_(void *arg);
-
   static void ws_event_handler_(void *handler_arg, esp_event_base_t base, int32_t event_id, void *event_data);
   static void reasm_reset_(WsReasm &r);
 
+  // Packet processing
   void process_packet_(void *client, const uint8_t *data, size_t len);
   void process_frame_packet_(const uint8_t *data, size_t len);
   void process_frame_stats_packet_(const uint8_t *data, size_t len);
   bool decode_jpeg_tile_to_lcd_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len);
   bool decode_jpeg_tile_software_(int16_t dst_x, int16_t dst_y, const uint8_t *data, size_t len);
 
+  // JPEGDEC software decoder callbacks
   static int jpeg_draw_cb_s_(JPEGDRAW *p);
   int jpeg_draw_cb_(JPEGDRAW *p);
   JPEGDEC jd_;
 
+  // WebSocket send helpers
   bool ws_send_touch_event_(proto::TouchType type, int x, int y, uint8_t pid);
   bool ws_send_keepalive_();
   bool ws_send_open_url_(const char *url, uint16_t flags);
 
+  // URI builder
   std::string resolve_device_id_() const;
   std::string build_ws_uri_() const;
   static void append_q_int_(std::string &s, const char *k, int v);
@@ -143,12 +174,38 @@ class RemoteWebView : public Component {
   friend class RemoteWebViewTouchListener;
 };
 
+// ── Touch listener ────────────────────────────────────────────────────────────
 class RemoteWebViewTouchListener : public touchscreen::TouchListener {
  public:
   explicit RemoteWebViewTouchListener(RemoteWebView *p) : parent_(p) {}
   void touch(touchscreen::TouchPoint tp) override;
   void update(const touchscreen::TouchPoints_t &pts) override;
   void release() override;
+ private:
+  RemoteWebView *parent_{nullptr};
+};
+
+// ── HA Automation Actions ─────────────────────────────────────────────────────
+
+// Gọi: remote_webview.reconnect_ws
+template<typename... Ts>
+class RemoteWebViewReconnectAction : public Action<Ts...> {
+ public:
+  void set_parent(RemoteWebView *p) { parent_ = p; }
+  void play(Ts... x) override { parent_->reconnect_ws(); }
+ private:
+  RemoteWebView *parent_{nullptr};
+};
+
+// Gọi: remote_webview.disable_touch (disable: true/false)
+template<typename... Ts>
+class RemoteWebViewDisableTouchAction : public Action<Ts...> {
+ public:
+  void set_parent(RemoteWebView *p)           { parent_ = p; }
+  TEMPLATABLE_VALUE(bool, disable)
+  void play(Ts... x) override {
+    parent_->disable_touch(this->disable_.value(x...));
+  }
  private:
   RemoteWebView *parent_{nullptr};
 };

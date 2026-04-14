@@ -1,0 +1,483 @@
+
+###### CẤU HÌNH GPIO Guition 4848S040 4.0 inch
+  ###### Sử dụng espressif/esp_new_jpeg
+# SD_MISO    
+# SD_MOSI     
+# SD_SCLK     
+# SD_CS       
+
+# Backlight.  38
+
+# LRCLK.      2 Speaker
+# BCLK.       1 Speaker
+# Dout_pin.   40 Speaker
+
+# SDA.        19 (touch)
+# SCL.        45 (touch)
+
+############## DISPLAY Pin ############
+#spi:
+# clk_pin: GPIO48
+# mosi_pin: GPIO47
+# cs_pin: 39
+# de_pin: 18
+# hsync_pin: 16
+# vsync_pin: 17
+# pclk_pin: 21
+#data_pins:
+#      red:
+#        - GPIO11
+#        - GPIO12
+#        - GPIO13
+#        - GPIO14
+#        - GPIO0
+#      green:
+#        - GPIO8
+#        - GPIO20
+#        - GPIO3
+#        - GPIO46
+#        - GPIO9
+#        - GPIO10
+#      blue:
+#        - GPIO4
+#        - GPIO5
+#        - GPIO6
+#        - GPIO7
+#        - GPIO15
+
+
+esphome:
+  name: guition-webview-4848s040
+  friendly_name: Guition Webview 4848S040
+  platformio_options:
+    board_build.flash_mode: dio
+  on_boot:
+    priority: -100
+    then:
+    - lambda: |-
+        int rotation = atoi(id(rotation_option).current_option().c_str());
+        id(rwv).set_rotation(rotation);
+    - lambda: |-
+        auto url = id(rwv_default_url).state;
+        if (url.size() > 0) {
+          id(rwv).set_url(url);
+        }
+    - delay: 2s                          # ← chờ rwv connect xong
+    - script.execute: inactivity_timer   # ← gọi sau
+      
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+  # Compiler
+      COMPILER_OPTIMIZATION_PERF: y
+
+  # CPU
+      CONFIG_ESP32S3_DEFAULT_CPU_FREQ_240: "y"
+
+  # Cache
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB: "y"
+      CONFIG_ESP32S3_INSTRUCTION_CACHE_LINE_32B: "y"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+
+  # PSRAM
+      CONFIG_SPIRAM_FETCH_INSTRUCTIONS: "y"
+      CONFIG_SPIRAM_RODATA: "y"
+      CONFIG_SPIRAM_USE_MALLOC: y
+      CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL: "32768"
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+
+  # LwIP / WiFi
+      CONFIG_LWIP_IRAM_OPTIMIZATION: "y"
+
+  # FreeRTOS
+      CONFIG_FREERTOS_HZ: "1000"
+
+  # Watchdog
+      CONFIG_ESP_TASK_WDT_TIMEOUT_S: "15"
+
+    advanced:
+      assertion_level: DISABLE
+      enable_lwip_mdns_queries: false
+      enable_lwip_bridge_interface: false   
+    components:
+      - name: "espressif/esp_websocket_client"
+        ref: 1.5.0
+      - name: "espressif/esp-dsp"
+        ref: 1.7.0
+      - name: "espressif/esp_new_jpeg"
+        ref: 1.0.0
+
+api:
+  actions:
+    - action: show_fullscreen_image
+      variables:
+        url: string
+      then:
+      - lambda: id(inactivity_timer).execute();  # ← thêm
+      - text.set:
+          id: rwv_url
+          value: !lambda 'return url;'
+
+    - action: set_url_raw
+      variables:
+        url: string
+      then:
+        - lambda: |-
+            std::string final_url = url;
+
+            if (
+              final_url.ends_with(".jpg") ||
+              final_url.ends_with(".png") ||
+              final_url.ends_with(".webp")
+            ) {
+              final_url += "?t=" + to_string(millis());
+            }
+
+            if (!id(rwv).open_url(final_url)) {
+              id(rwv).set_url(final_url);
+            }
+
+wifi:
+  ssid: 
+  password: ""
+  manual_ip:
+    static_ip: 
+    gateway: 
+    subnet: 255.255.255.0
+    dns1: 8.8.8.8
+    dns2: 8.8.4.4
+  ap:
+    ssid: "Guition 4848S040"
+    password: "12345678"
+
+ota:
+  - platform: esphome 
+
+captive_portal:
+      
+psram:
+  mode: octal
+  speed: 80MHz
+
+preferences:
+  flash_write_interval: 2s
+
+
+external_components:
+  - source: github://minhquanghp86/HA-Darboard-Client
+    refresh: 0s
+    components: [ remote_webview ]
+
+
+
+remote_webview:
+  id: rwv
+  server: 192.168.10.2:8081
+  url: http://192.168.10.2:8123/dashboard-mobile/3 
+  full_frame_tile_count: 4
+  max_bytes_per_msg: 32768
+  jpeg_quality: 60
+  tile_size: 64
+  min_frame_interval: 100
+  every_nth_frame: 1 
+  
+
+select:
+  - platform: template
+    name: "Xoay màn hình"
+    id: rotation_option
+    optimistic: true
+    restore_value: true
+    options:
+      - "0"
+      - "90"
+      - "180"
+      - "270"
+    initial_option: "0"
+    set_action:
+      - lambda: |-
+          int rotation = atoi(x.c_str());
+          id(rwv).set_rotation(rotation);
+          id(rwv).reconnect_ws();
+      - delay: 1500ms
+      - button.press: go_home
+
+
+text:
+  - platform: template
+    id: rwv_default_url
+    name: "URL mặc định"
+    optimistic: true
+    restore_value: true
+    mode: TEXT
+    min_length: 1
+    
+
+
+  - platform: template
+    id: rwv_url
+    name: "URL hiển thị"
+    optimistic: true
+    restore_value: false
+    min_length: 1
+    max_length: 255
+    mode: TEXT
+    set_action:
+      - lambda: id(inactivity_timer).execute();
+      - lambda: |-
+          std::string base_url = x.c_str();
+          std::string url = base_url;
+
+          // 👉 chỉ append ?t= nếu là ảnh
+          if (
+            base_url.ends_with(".jpg")  ||
+            base_url.ends_with(".jpeg") ||
+            base_url.ends_with(".png")  ||
+            base_url.ends_with(".webp")
+          ) {
+            url += "?t=";
+            url += to_string(millis());
+          }
+
+          if (!id(rwv).open_url(url)) {
+            id(rwv).set_url(url);
+            ESP_LOGI("remote_webview", "URL queued (not connected): %s", url.c_str());
+          } else {
+            ESP_LOGI("remote_webview", "URL loaded: %s", url.c_str());
+          }
+
+
+number:
+  - platform: template
+    name: "Sleep time"
+    id: sleep_time
+    optimistic: true
+    initial_value: 15
+    restore_value: yes
+    unit_of_measurement: "s"
+    device_class: duration
+    mode: box
+    min_value: 5
+    max_value: 600
+    step: 1
+
+
+script:
+  
+  - id: inactivity_timer
+    mode: restart
+    then:
+      - if:
+          condition:
+            light.is_off: display_backlight
+          then:
+            - light.turn_on:
+                id: display_backlight
+            - delay: 0.5s
+            - lambda: |-
+                id(rwv).disable_touch(false);
+      - if:
+          condition:
+            binary_sensor.is_on: video_playing
+          then:
+                
+          else:
+            - delay: !lambda 'return id(sleep_time).state * 1000;'                  
+            - if:
+                condition:
+                  binary_sensor.is_off: video_playing
+                then:
+                  - light.turn_off:
+                      id: display_backlight
+                  - lambda: |-
+                      id(rwv).disable_touch(true);
+
+
+binary_sensor:
+
+  - platform: template
+    id: video_playing
+    name: "Video Playing"
+    lambda: |-
+      return id(rwv).is_receiving_frames(3000);
+    on_release:
+      then:
+        script.execute: inactivity_timer
+          
+
+
+text_sensor:  
+
+  - platform: wifi_info
+    ip_address:
+      name: IP
+      id: ip_wifi
+    mac_address:
+      name: MAC ESP
+      id: mac_address
+    ssid:
+      name: WIFI KẾT NỐI
+      id: ssid_wifi
+
+switch:
+  - platform: template
+    name: "Remote Webview ON-OFF"
+    optimistic: true
+    restore_mode: ALWAYS_ON
+    id: rwv_switch
+    turn_on_action:
+      - lambda: id(rwv).disable_touch(false);
+      - remote_webview.resume:
+          id: rwv
+      
+    turn_off_action:
+      - lambda: id(rwv).disable_touch(true);
+      - remote_webview.pause:
+          id: rwv
+      - delay: 50ms
+      - display.page.show: page1
+      - component.update: my_display
+
+button:
+  - platform: template
+    name: "Go Home"
+    id: go_home
+    icon: "mdi:home"
+    on_press:
+      then:
+        - if:
+            condition:
+              lambda: 'return id(rwv_default_url).state.size() > 0;'
+            then:
+              - text.set:
+                  id: rwv_url
+                  value: !lambda 'return id(rwv_default_url).state;'
+
+  - platform: restart 
+    name: "Khởi động lại"
+    id: restart_switch  
+
+
+
+spi:
+  clk_pin: GPIO48
+  mosi_pin: GPIO47
+
+i2c:
+  - id: bus_a
+    sda: GPIO19
+    scl: GPIO45
+
+display:
+  - platform: st7701s
+    id: my_display
+    show_test_card: False
+    update_interval: never
+    auto_clear_enabled: False
+    spi_mode: MODE3
+    data_rate: 40MHz
+    color_order: RGB
+    invert_colors: False
+    dimensions:
+      width: 480
+      height: 480
+    cs_pin: 39
+    de_pin: 18
+    hsync_pin: 16
+    vsync_pin: 17
+    pclk_pin: 21
+    pclk_frequency: 16MHz
+    pclk_inverted: False
+    hsync_pulse_width: 8
+    hsync_front_porch: 10
+    hsync_back_porch: 20
+    vsync_pulse_width: 8
+    vsync_front_porch: 10
+    vsync_back_porch: 10
+    init_sequence:
+      - 1
+      - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10]
+      - [0xCD, 0x00]
+    data_pins:
+      red:
+        - GPIO11
+        - GPIO12
+        - GPIO13
+        - GPIO14
+        - GPIO0
+      green:
+        - GPIO8
+        - GPIO20
+        - GPIO3
+        - GPIO46
+        - GPIO9
+        - GPIO10
+      blue:
+        - GPIO4
+        - GPIO5
+        - GPIO6
+        - GPIO7
+        - GPIO15
+    pages:
+      - id: page1
+        lambda: |-
+          it.fill(COLOR_OFF);
+          it.strftime(240, 240, id(my_font),TextAlign::CENTER, "%H:%M:%S", id(my_time).now());
+
+
+interval:
+  - interval: 20ms
+    then:
+      - if: 
+          condition:
+            switch.is_off: rwv_switch
+          then:
+            - component.update: my_display
+
+
+  
+
+
+time:
+  - platform: homeassistant
+    id: my_time
+
+font:
+  - file: "gfonts://Roboto"
+    id: my_font
+    size: 96
+
+
+
+touchscreen:
+  platform: gt911
+  transform:
+    mirror_x: false
+    mirror_y: false
+  on_touch:
+    then:
+      - script.execute: inactivity_timer
+
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    name: Display Backlight
+    icon: mdi:lightbulb-on
+    id: display_backlight
+    restore_mode: ALWAYS_ON
+    on_turn_on:
+      then:
+        - script.execute: inactivity_timer
+
+

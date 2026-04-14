@@ -201,6 +201,11 @@ text:
 - **big_endian** — mặc định là **true**. Nếu màu sắc trông không đúng (bị hoán đổi/bị tô màu), hãy đặt `big_endian: false` cho các bảng điều khiển yêu cầu chế độ little-endian RGB565.
 - **Red tile/red screen** — điều này cho biết tải trọng ô đã vượt quá `max_bytes_per_msg`. Tăng `max_bytes_per_msg` hoặc giảm kích thước ô/chất lượng JPEG để mỗi ô vừa vặn.
 
-## Không có bàn phím trên màn hình
+### Cập nhật
+- **KEYBOARD** Hiện tại bàn phím trên màn hình đã được hỗ trợ (Cần cài đặt lại addon ở phía server)
+- **frame_update** Hỗ trợ cảm biến theo dõi khung hình có đang liên tục cập nhật hay không. Nếu liên tục cập nhật có nghĩa là màn hình đang hiển thị video(hoặc ảnh động). Hữu ích cho việc cấu hình không tắt đèn nền khi màn hình đang phát stream camera. Có thể sử dụng lambda để lấy trạng thái: Ví dụ:
+- lambda: |-
+    return id(rwv).is_receiving_frames(3000);
 
-Không có bàn phím trên màn hình; bạn sẽ cần [sử dụng công cụ phát triển Chrome](https://github.com/strange-v/RemoteWebViewServer#accessing-the-servers-tab-with-chrome-devtools) cho bất kỳ dữ liệu đầu vào nào cần thiết.
+- **Rotation** Hiện đã chạy theo realtime. Có thể thay đổi góc xoay màn hình trực tiếp khi thiết bị đang chạy mà không cần khởi động lại
+
